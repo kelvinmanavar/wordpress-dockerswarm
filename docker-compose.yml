@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # MySQL 5.7
+  mysql57:
+    image: mysql:5.7
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    networks:
+      - traefik-net
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: site1_db
+      MYSQL_USER: site1_user
+      MYSQL_PASSWORD: site1_pass
+    volumes:
+      - mysql57-data:/var/lib/mysql
+
+  # MySQL 8.0
+  mysql80:
+    image: mysql:8.0
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    networks:
+      - traefik-net
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: site2_db
+      MYSQL_USER: site2_user
+      MYSQL_PASSWORD: site2_pass
+    volumes:
+      - mysql80-data:/var/lib/mysql
+
+  # Traefik
+  traefik:
+    image: traefik:v2.10
+    command:
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --providers.docker.swarmMode=true
+      - --providers.docker.watch=true
+      - --providers.docker.endpoint=unix:///var/run/docker.sock
+      - --providers.docker.exposedByDefault=false
+      - --entryPoints.web.address=:80
+      - --entryPoints.websecure.address=:443
+      - --certificatesResolvers.letsencrypt.acme.email=your-email@example.com
+      - --certificatesResolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesResolvers.letsencrypt.acme.httpChallenge.entryPoint=web
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080" # Traefik Dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - traefik-certificates:/letsencrypt
+    networks:
+      - traefik-net
+
+  # WordPress Site 1
+  wordpress-site1:
+    image: wordpress:latest
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    networks:
+      - traefik-net
+    environment:
+      WORDPRESS_DB_HOST: mysql57
+      WORDPRESS_DB_USER: site1_user
+      WORDPRESS_DB_PASSWORD: site1_pass
+      WORDPRESS_DB_NAME: site1_db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.site1.rule=Host(`site1.example.com`)"
+      - "traefik.http.routers.site1.entrypoints=websecure"
+      - "traefik.http.routers.site1.tls.certresolver=letsencrypt"
+
+  # WordPress Site 2
+  wordpress-site2:
+    image: wordpress:latest
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    networks:
+      - traefik-net
+    environment:
+      WORDPRESS_DB_HOST: mysql80
+      WORDPRESS_DB_USER: site2_user
+      WORDPRESS_DB_PASSWORD: site2_pass
+      WORDPRESS_DB_NAME: site2_db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.site2.rule=Host(`site2.example.com`)"
+      - "traefik.http.routers.site2.entrypoints=websecure"
+      - "traefik.http.routers.site2.tls.certresolver=letsencrypt"
+
+volumes:
+  mysql57-data:
+  mysql80-data:
+  traefik-certificates:
+
+networks:
+  traefik-net:
+    driver: overlay
